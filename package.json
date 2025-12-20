@@ -1,0 +1,10 @@
+{
+  "name": "ticketing-oh-controller",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix frontend\" \"cd backend && go run main.go\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
