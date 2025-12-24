@@ -1,151 +1,152 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
-import { Html5Qrcode, Html5QrcodeScanner } from "html5-qrcode";
-import type { Html5QrcodeCameraScanConfig } from "html5-qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 
 export default function Home() {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-  const [qrResult, setQrResult] = useState<string | null>(null);
-  const [torchOn, setTorchOn] = useState(false);
-  const [cameras, setCameras] = useState<{ id: string; label: string }[]>([]);
-  const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
+  const qrRegionId = "qr-reader";
+  const qrCodeRef = useRef<Html5Qrcode | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Initialize cameras
-  useEffect(() => {
-    async function initCameras() {
-      try {
-        const availableCameras = await Html5Qrcode.getCameras();
-        if (availableCameras && availableCameras.length) {
-          setCameras(
-            availableCameras.map((cam) => ({ id: cam.id, label: cam.label }))
-          );
-          setSelectedCamera(availableCameras[0].id);
-        }
-      } catch (err) {
-        console.error("Camera init error:", err);
-      }
-    }
-    initCameras();
+  const [cameras, setCameras] = useState<{ id: string; label: string }[]>([]);
+  const [selectedCamera, setSelectedCamera] = useState("");
+  const [torchOn, setTorchOn] = useState(false);
+  const [qrResult, setQrResult] = useState<string | null>(null);
 
-    // Initialize sound
-    audioRef.current = new Audio("/beep.mp3"); // put your beep.mp3 in public folder
+  useEffect(() => {
+    audioRef.current = new Audio("/beep.mp3");
+
+    Html5Qrcode.getCameras().then((devices) => {
+      if (devices.length) {
+        setCameras(devices);
+        setSelectedCamera(devices[0].id);
+      }
+    });
+
+    return () => {
+      qrCodeRef.current?.stop().catch(() => {});
+      qrCodeRef.current?.clear();
+    };
   }, []);
 
-  // Initialize scanner
   useEffect(() => {
     if (!selectedCamera) return;
 
-    // Clear previous scanner
-    scannerRef.current?.clear().catch(() => {});
+    const start = async () => {
+      if (qrCodeRef.current) {
+        await qrCodeRef.current.stop().catch(() => {});
+        await qrCodeRef.current.clear();
+      }
 
-    const config: Html5QrcodeCameraScanConfig = {
-      fps: 10,
-      qrbox: { width: 300, height: 300 },
-      experimentalFeatures: {
-        useBarCodeDetectorIfSupported: true,
-      },
-      rememberLastUsedCamera: true,
+      const scanner = new Html5Qrcode(qrRegionId);
+      qrCodeRef.current = scanner;
+
+      await scanner.start(
+        { deviceId: { exact: selectedCamera } },
+        {
+          fps: 10,
+          qrbox: { width: 360, height: 360 },
+          aspectRatio: 1,
+        },
+        (decodedText) => {
+          setQrResult(decodedText);
+          audioRef.current?.play().catch(() => {});
+        }
+      );
     };
 
-    scannerRef.current = new Html5QrcodeScanner("qr-reader", config, false);
-    scannerRef.current.render(
-      (decodedText) => {
-        setQrResult(decodedText);
-        // Play sound
-        audioRef.current?.play().catch(() => {});
-      },
-      (error) => console.warn("QR Scan Error:", error),
-      selectedCamera
-    );
-
-    return () => {
-      scannerRef.current?.clear().catch(() => {});
-    };
+    start();
   }, [selectedCamera]);
 
-  // Torch toggle
   const toggleTorch = async () => {
-    setTorchOn((prev) => !prev);
     try {
-      const track = scannerRef.current?.getRunningTrack?.();
-      if (track?.applyConstraints) {
-        await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
-      }
-    } catch (e) {
-      console.warn("Torch not supported:", e);
-    }
+      const caps =
+        await qrCodeRef.current?.getRunningTrackCapabilities();
+      if (!caps?.torch) return;
+
+      await qrCodeRef.current?.applyVideoConstraints({
+        advanced: [{ torch: !torchOn }],
+      });
+      setTorchOn((p) => !p);
+    } catch {}
   };
 
   return (
-    <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col text-gray-900 dark:text-white font-display antialiased">
-      {/* Header */}
-      <header className="p-4 border-b border-gray-200 dark:border-[#254632] flex justify-between items-center">
-        <h1 className="text-xl font-bold flex items-center gap-2">
-          <span className="material-symbols-outlined">qr_code_scanner</span>
-          OH Ticket Scanner
-        </h1>
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          System Ready
-        </span>
-      </header>
-
-      {/* Main Layout */}
-      <main className="flex-1 flex flex-col md:flex-row gap-4 p-4 sm:p-6 lg:p-10">
-        {/* Camera Container */}
-        <div className="flex-1 relative bg-black rounded-lg overflow-hidden border border-gray-800 dark:border-[#254632] flex justify-center items-center">
-          <div id="qr-reader" className="w-full h-full"></div>
-          {/* QR Box Overlay */}
-          <div className="absolute inset-0 border-2 border-primary/30 rounded-lg pointer-events-none">
-            <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-lg"></div>
-            <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-lg"></div>
-            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-lg"></div>
-            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-lg"></div>
-          </div>
+    <div className="min-h-screen w-full flex flex-col bg-gradient-to-br from-[#7F55B1] to-[#9B7EBD] text-[#2a1d3a]">
+      {/* NAVBAR */}
+      <header className="h-20 px-6 md:px-10 flex items-center justify-between bg-white/30 backdrop-blur border-b border-white/40">
+        <div>
+          <h1 className="text-xl font-semibold tracking-wide">
+            OH Ticket Scanner
+          </h1>
+          <p className="text-sm opacity-70">
+            Live verification system
+          </p>
         </div>
 
-        {/* Settings Container */}
-        <div className="flex flex-col gap-4 md:w-72">
-          {/* Camera Selection */}
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-semibold">Select Camera:</label>
+        <a
+          href="/dashboard"
+          target="_blank"
+          rel="noopener noreferrer">
+          <button className="px-5 py-2.5 rounded-xl bg-[#F49BAB]/80 hover:bg-[#F49BAB] transition text-white font-medium">
+          Dashboard
+          </button>
+        </a>
+      </header>
+
+      {/* MAIN */}
+      <main className="flex-1 grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-6 p-4 md:p-8">
+        {/* CAMERA */}
+        <section className="relative w-full h-[65vh] md:h-full rounded-3xl overflow-hidden bg-black shadow-2xl">
+          <div id={qrRegionId} className="absolute inset-0" />
+
+          {/* SCANNER FRAME */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-[70vw] max-w-[360px] aspect-square rounded-3xl border-[3px] border-[#F49BAB] shadow-[0_0_60px_#F49BAB88]" />
+          </div>
+        </section>
+
+        {/* PANEL */}
+        <aside className="flex flex-col justify-center gap-6">
+          <div className="bg-[#FFE1E0]/60 backdrop-blur border border-white/50 rounded-2xl p-5">
+            <p className="text-sm opacity-70 mb-2">
+              Camera source
+            </p>
             <select
-              className="p-2 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-              value={selectedCamera ?? ""}
+              value={selectedCamera}
               onChange={(e) => setSelectedCamera(e.target.value)}
+              className="w-full p-3 rounded-xl bg-white/80 border border-white/60 outline-none"
             >
-              {cameras.map((cam) => (
-                <option key={cam.id} value={cam.id}>
-                  {cam.label}
+              {cameras.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label || "Camera"}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Torch Button */}
           <button
             onClick={toggleTorch}
-            className="flex items-center justify-center h-12 px-4 rounded-full bg-surface-dark border border-[#366348] hover:bg-[#254632] text-white gap-2 transition-colors duration-200"
+            className="h-14 rounded-2xl bg-[#F49BAB]/80 hover:bg-[#F49BAB] transition font-semibold text-white shadow-lg"
           >
-            <span className="material-symbols-outlined">
-              {torchOn ? "flashlight_off" : "flashlight_on"}
-            </span>
-            {torchOn ? "Turn Off Flash" : "Turn On Flash"}
+            {torchOn ? "Disable flashlight" : "Enable flashlight"}
           </button>
 
-          {/* QR Result */}
           {qrResult && (
-            <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg text-center break-words">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
-                QR Code Detected:
+            <div className="bg-[#FFE1E0]/60 backdrop-blur border border-white/50 rounded-2xl p-4">
+              <p className="text-xs opacity-60 mb-1">
+                Last scanned code
               </p>
-              <p className="font-mono text-gray-900 dark:text-white">{qrResult}</p>
+              <p className="font-mono text-sm break-words">
+                {qrResult}
+              </p>
             </div>
           )}
-        </div>
+        </aside>
       </main>
 
-      <footer className="p-4 text-center text-xs text-gray-400 dark:text-[#5a7a67]">
-        Scanning happens locally on your device for privacy.
+      <footer className="text-center text-xs text-white/80 py-3">
+        Secure local camera processing
       </footer>
     </div>
   );
